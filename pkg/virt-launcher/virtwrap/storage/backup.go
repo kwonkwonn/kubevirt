@@ -36,7 +36,7 @@ import (
 	"kubevirt.io/client-go/log"
 
 	osdisk "kubevirt.io/kubevirt/pkg/os/disk"
-	kutil "kubevirt.io/kubevirt/pkg/util"
+	"kubevirt.io/kubevirt/pkg/safepath"
 	"kubevirt.io/kubevirt/pkg/virt-launcher/metadata"
 	api "kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/api"
 	"kubevirt.io/kubevirt/pkg/virt-launcher/virtwrap/cli"
@@ -137,19 +137,34 @@ func (m *StorageManager) backup(vmi *v1.VirtualMachineInstance, backupOptions *b
 
 	var backupPath string
 	if backupOptions.PushPath != nil {
-		backupPath = getBackupPath(backupOptions, vmi.Name)
-		if err := kutil.MkdirAllWithNosec(backupPath); err != nil {
-			logger.Reason(err).Error("error creating dir for backup")
+		pushSafePath, err := safepath.NewPathNoFollow(*backupOptions.PushPath)
+		if err != nil {
+			return fmt.Errorf("error validating backup push path: %w", err)
+		}
+		if err := safepath.MkdirAtNoFollow(pushSafePath, vmi.Name, 0750); err != nil && !errors.Is(err, os.ErrExist) {
 			return fmt.Errorf("error creating dir for backup: %w", err)
 		}
-		defer func(path string) {
+		vmiSafePath, err := safepath.JoinAndResolveWithRelativeRoot(*backupOptions.PushPath, vmi.Name)
+		if err != nil {
+			return fmt.Errorf("error resolving backup vmi path: %w", err)
+		}
+		backupDirName := filepath.Base(getBackupPath(backupOptions, vmi.Name))
+		if err := safepath.MkdirAtNoFollow(vmiSafePath, backupDirName, 0750); err != nil {
+			return fmt.Errorf("error creating dir for backup: %w", err)
+		}
+		backupSafePath, err := vmiSafePath.AppendAndResolveWithRelativeRoot(backupDirName)
+		if err != nil {
+			return fmt.Errorf("error resolving backup path: %w", err)
+		}
+		backupPath = getBackupPath(backupOptions, vmi.Name)
+		defer func() {
 			if failed != nil {
 				logger.Reason(failed).Error("failed to run backup, cleaning up backup directory")
-				if err := os.RemoveAll(path); err != nil {
+				if err := safepath.RemoveAllAtNoFollow(backupSafePath); err != nil {
 					logger.Reason(err).Error("failed to clean up backup directory")
 				}
 			}
-		}(backupPath)
+		}()
 	}
 	domainBackup, domainCheckpoint, backupVolumesInfo := generateDomainBackup(domainDisks, backupOptions, backupPath)
 	backupXML, err := xml.Marshal(domainBackup)
@@ -254,6 +269,7 @@ func generateDomainBackup(disks []api.Disk, backupOptions *backupv1.BackupOption
 	}
 	return domainBackup, domainCheckpoint, backupVolumesInfo
 }
+
 
 func getBackupPath(backupOptions *backupv1.BackupOptions, vmiName string) string {
 	backupTime := backupTimeFormatted(backupOptions.BackupStartTime)
