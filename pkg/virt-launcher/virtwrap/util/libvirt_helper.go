@@ -16,6 +16,8 @@ import (
 	"syscall"
 	"time"
 
+	"kubevirt.io/kubevirt/pkg/safepath"
+
 	"golang.org/x/sys/unix"
 	k8sv1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -318,11 +320,17 @@ func startVirtlogdLogging(stopChan chan struct{}, domainName string, nonRoot boo
 				}
 				time.Sleep(time.Second)
 			}
-			// #nosec No risk for path injection. logfile has a static basedir
-			file, err := os.Open(logfile)
+			logPath, err := safepath.NewPathNoFollow(logfile)
 			if err != nil {
-				errMsg := fmt.Sprintf("failed to open logfile in path: \"%s\"", logfile)
-				log.Log.Reason(err).Error(errMsg)
+				log.Log.Reason(err).Errorf("failed to open logfile path: %q", logfile)
+				return
+			}
+			var file *os.File
+			if err := logPath.ExecuteNoFollow(func(safePath string) (err error) {
+				file, err = os.Open(safePath)
+				return
+			}); err != nil {
+				log.Log.Reason(err).Errorf("failed to open logfile in path: %q", logfile)
 				return
 			}
 			defer util.CloseIOAndCheckErr(file, nil)
