@@ -420,6 +420,66 @@ func UnlinkAtNoFollow(path *Path) error {
 	return nil
 }
 
+// RemoveAllAtNoFollow removes the directory at path and all of its contents
+// without following symlinks.
+func RemoveAllAtNoFollow(path *Path) error {
+	var entries []os.DirEntry
+	if err := path.ExecuteNoFollow(func(safePath string) error {
+		var err error
+		entries, err = os.ReadDir(safePath)
+		return err
+	}); err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		childPath, err := path.AppendAndResolveWithRelativeRoot(entry.Name())
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			if err := RemoveAllAtNoFollow(childPath); err != nil {
+				return err
+			}
+		} else {
+			if err := UnlinkAtNoFollow(childPath); err != nil {
+				return err
+			}
+		}
+	}
+	return UnlinkAtNoFollow(path)
+}
+
+// OpenOrCreateNoFollow opens the file at path if it exists, or creates it with
+// the given mode if it doesn't. The returned cleanup function removes the file
+// if it was freshly created; if the file already existed, cleanup is a no-op.
+func OpenOrCreateNoFollow(path string, mode os.FileMode) (*File, func(), error) {
+	f, err := NewFileNoFollow(path)
+	if err == nil {
+		return f, func() {}, nil
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return nil, nil, err
+	}
+	parentPath, err := NewPathNoFollow(filepath.Dir(path))
+	if err != nil {
+		return nil, nil, err
+	}
+	basename := filepath.Base(path)
+	if err := TouchAtNoFollow(parentPath, basename, mode); err != nil {
+		return nil, nil, err
+	}
+	filePath, err := parentPath.AppendAndResolveWithRelativeRoot(basename)
+	if err != nil {
+		return nil, nil, err
+	}
+	f, err = OpenAtNoFollow(filePath)
+	if err != nil {
+		_ = UnlinkAtNoFollow(filePath)
+		return nil, nil, err
+	}
+	return f, func() { _ = UnlinkAtNoFollow(filePath) }, nil
+}
+
 // ListenUnixNoFollow safely creates a socket in user-owned path
 // Since there exists no socketat on unix, first a safe delete is performed,
 // then the socket is created.

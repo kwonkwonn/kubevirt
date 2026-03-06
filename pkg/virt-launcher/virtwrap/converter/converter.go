@@ -215,28 +215,31 @@ func NewDirectIOChecker() DirectIOChecker {
 }
 
 func (c *directIOChecker) CheckBlockDevice(path string) (bool, error) {
-	return c.check(path, syscall.O_RDONLY)
+	safeFile, err := safepath.NewFileNoFollow(path)
+	if err != nil {
+		return false, err
+	}
+	defer safeFile.Close()
+	return c.check(safeFile.SafePath())
 }
 
 func (c *directIOChecker) CheckFile(path string) (bool, error) {
-	flags := syscall.O_RDONLY
-	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
-		// try to create the file and perform the check
-		flags = flags | syscall.O_CREAT
-		defer os.Remove(path)
+	safeFile, cleanup, err := safepath.OpenOrCreateNoFollow(path, 0600)
+	if err != nil {
+		return false, err
 	}
-	return c.check(path, flags)
+	defer cleanup()
+	defer safeFile.Close()
+	return c.check(safeFile.SafePath())
 }
 
 // based on https://gitlab.com/qemu-project/qemu/-/blob/master/util/osdep.c#L344
-func (c *directIOChecker) check(path string, flags int) (bool, error) {
-	// #nosec No risk for path injection as we only open the file, not read from it. The function leaks only whether the directory to `path` exists.
-	f, err := os.OpenFile(path, flags|syscall.O_DIRECT, 0600)
+func (c *directIOChecker) check(safePath string) (bool, error) {
+	f, err := os.OpenFile(safePath, syscall.O_RDONLY|syscall.O_DIRECT, 0600)
 	if err != nil {
 		// EINVAL is returned if the filesystem does not support the O_DIRECT flag
-		if err, ok := err.(*os.PathError); ok && err.Err == syscall.EINVAL {
-			// #nosec No risk for path injection as we only open the file, not read from it. The function leaks only whether the directory to `path` exists.
-			f, err := os.OpenFile(path, flags & ^syscall.O_DIRECT, 0600)
+		if pathErr, ok := err.(*os.PathError); ok && pathErr.Err == syscall.EINVAL {
+			f, err := os.OpenFile(safePath, syscall.O_RDONLY, 0600)
 			if err == nil {
 				defer util.CloseIOAndCheckErr(f, nil)
 				return false, nil
