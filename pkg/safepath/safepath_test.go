@@ -297,4 +297,53 @@ var _ = Describe("safepath", func() {
 		})).To(Succeed())
 		Expect(files).To(HaveLen(1))
 	})
+
+	It("ReadFileNoFollow should read file contents", func() {
+		baseDir := GinkgoT().TempDir()
+		Expect(os.WriteFile(filepath.Join(baseDir, "data"), []byte("test-file-content"), 0600)).To(Succeed())
+
+		p, err := JoinAndResolveWithRelativeRoot(baseDir, "data")
+		Expect(err).ToNot(HaveOccurred())
+
+		content, err := ReadFileNoFollow(p)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(content).To(Equal([]byte("test-file-content")))
+	})
+
+	It("ReadFileNoFollow should reject a symlink", func() {
+		baseDir := GinkgoT().TempDir()
+		target := filepath.Join(baseDir, "real")
+		link := filepath.Join(baseDir, "link")
+		Expect(os.WriteFile(target, []byte("test-file-content"), 0600)).To(Succeed())
+		Expect(os.Symlink(target, link)).To(Succeed())
+
+		p := newPath(baseDir, "link")
+		_, err := ReadFileNoFollow(p)
+		Expect(err).To(HaveOccurred())
+	})
+
+	It("ReadDirNoFollow should list directory entries", func() {
+		baseDir := GinkgoT().TempDir()
+		Expect(os.WriteFile(filepath.Join(baseDir, "file-a"), []byte{}, 0600)).To(Succeed())
+		Expect(os.WriteFile(filepath.Join(baseDir, "file-b"), []byte{}, 0600)).To(Succeed())
+
+		p, err := JoinAndResolveWithRelativeRoot(baseDir)
+		Expect(err).ToNot(HaveOccurred())
+
+		entries, err := ReadDirNoFollow(p)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(entries).To(HaveLen(2))
+	})
+
+	It("ReadDirNoFollow should reject a symlinked directory", func() {
+		baseDir := GinkgoT().TempDir()
+		realDir := filepath.Join(baseDir, "real")
+		link := filepath.Join(baseDir, "link")
+		Expect(os.Mkdir(realDir, 0700)).To(Succeed())
+		Expect(os.Symlink(realDir, link)).To(Succeed())
+
+		p := newPath(baseDir, "link")
+		_, err := ReadDirNoFollow(p)
+		Expect(err).To(HaveOccurred())
+	})
 })

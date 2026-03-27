@@ -311,6 +311,26 @@ func (p *Path) ExecuteNoFollow(callback func(safePath string) error) error {
 	return callback(f.SafePath())
 }
 
+// ReadFileNoFollow reads the contents of the file at the given path without following symlinks.
+func ReadFileNoFollow(path *Path) ([]byte, error) {
+	pathFd, err := OpenAtNoFollow(path)
+	if err != nil {
+		return nil, err
+	}
+	defer pathFd.Close()
+	return os.ReadFile(pathFd.SafePath())
+}
+
+// ReadDirNoFollow reads the directory entries at the given path without following symlinks.
+func ReadDirNoFollow(path *Path) ([]os.DirEntry, error) {
+	pathFd, err := OpenAtNoFollow(path)
+	if err != nil {
+		return nil, err
+	}
+	defer pathFd.Close()
+	return os.ReadDir(pathFd.SafePath())
+}
+
 // DirNoFollow returns the parent directory of the safepath.Path as safepath.Path.
 func (p *Path) DirNoFollow() (*Path, error) {
 	if len(p.relativePath) == 0 {
