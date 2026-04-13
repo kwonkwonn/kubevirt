@@ -314,7 +314,7 @@ func startVirtlogdLogging(stopChan chan struct{}, domainName string, nonRoot boo
 
 			// It can take a few seconds to the log file to be created
 			for {
-				_, err = os.Stat(logfile)
+				_, err = safepath.NewPathNoFollow(logfile)
 				if !errors.Is(err, os.ErrNotExist) {
 					break
 				}

@@ -534,8 +534,14 @@ func (l *AccessCredentialManager) HandleQemuAgentAccessCredentials(vmi *v1.Virtu
 	}
 
 	for _, dir := range secretDirs {
-		err = l.watcher.Add(dir)
+		dirSafePath, err := safepath.NewPathNoFollow(dir)
 		if err != nil {
+			_ = l.watcher.Close()
+			return err
+		}
+		if err := dirSafePath.ExecuteNoFollow(func(resolvedPath string) error {
+			return l.watcher.Add(resolvedPath)
+		}); err != nil {
 			// Ignoring error returned by watcher.Close(),
 			// because another error will be returned.
 			_ = l.watcher.Close()
